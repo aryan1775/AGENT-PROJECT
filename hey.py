@@ -125,28 +125,28 @@ button=st.button("Generate Answer")
 if button:
     if user_input:
 
-        with st.spinner("Generate response.."):
-               st_cb = StreamlitCallbackHandler(
-                  st.container(),
-                  expand_new_thoughts=False)
-
-            st.session_state.messages.append({"role": "user", "content":user_input})
-            st.chat_message("user").write(user_input)
-
-
-            response = agent.invoke(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": user_input
-                        }
-                    ]
-                },
-                config={
-                    "callbacks": [st_cb]
-                }
-            )
+            with st.spinner("Generate response.."):
+                st_cb = StreamlitCallbackHandler(
+                      st.container(),
+                      expand_new_thoughts=False)
+    
+                st.session_state.messages.append({"role": "user", "content":user_input})
+                st.chat_message("user").write(user_input)
+    
+    
+                response = agent.invoke(
+                    {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": user_input
+                            }
+                        ]
+                    },
+                    config={
+                        "callbacks": [st_cb]
+                    }
+                )
             answer = response["messages"][-1].content
             st.session_state.messages.append({"role":"assistant","content":answer})
             st.write("###response")
