@@ -133,22 +133,21 @@ if button:
                 st.session_state.messages.append({"role": "user", "content":user_input})
                 st.chat_message("user").write(user_input)
     
-    
-                response = agent.invoke(
-                    {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": user_input
-                            }
-                        ]
-                    },
-                    config={
-                        "callbacks": [st_cb]
-                    }
-                )
-            answer = response["messages"][-1].content
-            st.session_state.messages.append({"role":"assistant","content":answer})
+                with st.chat_message("assistant"):
+                    response = agent.invoke(
+                        {
+                            "messages": [
+                                {
+                                    "messages":st.session_state.messages
+                                }
+                            ]
+                        },
+                        config={
+                            "callbacks": [st_cb]
+                        }
+                    )
+                answer = response["messages"][-1].content
+                st.session_state.messages.append({"role":"assistant","content":answer})
             st.write("###response")
             st.success(answer)
 
