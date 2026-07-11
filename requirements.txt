@@ -16,7 +16,7 @@ wikipedia-api
 chromadb
 sentence-transformers
 faiss-cpu
-duckduckgo-search==8.1.1
+ddgs
 pandas
 openai
 mysql-connector-python
