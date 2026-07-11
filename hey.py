@@ -14,7 +14,7 @@ load_dotenv()
 
 #importing from env file
 
-api_key=os.getenv("GROQ_API")
+api_key=st.secrets["GROQ_API"]
 
 #creating the model
 
