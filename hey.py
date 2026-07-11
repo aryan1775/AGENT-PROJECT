@@ -1,157 +1,313 @@
-from langchain_groq import ChatGroq
-from langchain_community.utilities import WikipediaAPIWrapper
-from langchain_classic.chains import LLMMathChain
-from langchain_classic.chains.llm import LLMChain
-from langchain_classic.prompts.prompt import PromptTemplate
-from langchain.agents import create_agent
-from langchain_community.tools import Tool
+import ast
+import operator
+
 import streamlit as st
-from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
-from langchain.tools import tool
-import os
-from dotenv import load_dotenv
-load_dotenv()
-
-#importing from env file
-
-api_key=st.secrets["GROQ_API"]
-
-#creating the model
-
-model=ChatGroq(model="llama-3.3-70b-versatile",api_key=api_key,temperature=0)
-
-#creating the tools
-
-@tool
-def Math_tool(expression: str) -> str:
-    """ Solves mathematical calculations. Input should be a valid Python mathematical expression. """
-    try:
-        result = eval(expression)
-        return str(result)
-    except Exception as e:
-        return f"Error: {e}"
-
-#creating the math tool
-import wikipediaapi
-from langchain_core.tools import tool
 from ddgs import DDGS
 
-@tool
-def search_tool(query:str) -> str:
-    """Please use this tool to search the person , place or the information in the web in detail like in 300 words"""
-    with DDGS() as ddgs:
-        results = list(ddgs.text(query, max_results=5))
-
-    if not results:
-        return "No search results found."
-
-    output = []
-
-    for result in results:
-        output.append(
-            f"Title: {result['title']}\n"
-            f"Body: {result['body']}\n"
-            f"URL: {result['href']}\n"
-        )
-
-    return "\n\n".join(output)
-
-#creating the prompt and logic reasoning tool
-
-prompt="""
-You are the reasoning tool
-"""
-
-prompt_template=PromptTemplate(input_variables=["text"],template=prompt)
-
-chain=LLMChain(llm=model,prompt=prompt_template)
-
-@tool
-def logic_reasoning(query:str) -> str:
-    """You are the reasoning tool"""
-    return chain.run(query)
-
-# logic_reasoning=Tool(
-#     name="Logic_reasoning_tool",
-#     func=chain.run,
-#     description="You are the reasoning tool"
-# )
-
-tools=[search_tool,Math_tool,logic_reasoning]
-
-#create the agent
-agent=create_agent(model=model,tools=tools,system_prompt="""
-You are a helpful assistant.
-
-You have access ONLY to these tools:
-- search_tool
-- math_tool
-- logic_reasoning
-
-Never call brave_search, web_search, google_search, browser_search, or any tool not listed above.
-
-For factual biography questions, use wikipedia_tool.
-For calculations, use math_tool.
-For reasoning, use logic_reasoning.
-""")
-
-#streamlit
-
-st.set_page_config(page_title="MATH PROBLEM SOLVER",page_icon="👻")
-st.title("Ayy lowde")
+from langchain.agents import create_agent
+from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
+from langchain_core.tools import tool
+from langchain_groq import ChatGroq
 
 
-groq_api_key=st.sidebar.text_input(label="Groq API key",type="password")
+# =========================================================
+# PAGE CONFIGURATION
+# =========================================================
 
-if not groq_api_key:
-    st.info("Please providet the GROQ API key")
+st.set_page_config(
+    page_title="AI Problem Solver",
+    page_icon="👻"
+)
+
+st.title("AI Math and Search Assistant")
+
+
+# =========================================================
+# LOAD GROQ API KEY
+# =========================================================
+
+try:
+    api_key = st.secrets["GROQ_API"]
+
+except KeyError:
+    st.error(
+        "GROQ_API was not found in Streamlit Secrets. "
+        "Open Manage app → Settings → Secrets and add it."
+    )
     st.stop()
 
+
+# =========================================================
+# CREATE MODEL
+# =========================================================
+
+model = ChatGroq(
+    model="llama-3.3-70b-versatile",
+    api_key=api_key,
+    temperature=0
+)
+
+
+# =========================================================
+# SAFE MATH TOOL
+# =========================================================
+
+allowed_operators = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.Mod: operator.mod,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+
+
+def evaluate_expression(node):
+    """
+    Recursively evaluate a safe mathematical expression.
+    """
+
+    if isinstance(node, ast.Expression):
+        return evaluate_expression(node.body)
+
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return node.value
+
+        raise ValueError("Only numbers are allowed.")
+
+    if isinstance(node, ast.BinOp):
+        operation = allowed_operators.get(type(node.op))
+
+        if operation is None:
+            raise ValueError("Unsupported mathematical operator.")
+
+        left_value = evaluate_expression(node.left)
+        right_value = evaluate_expression(node.right)
+
+        return operation(left_value, right_value)
+
+    if isinstance(node, ast.UnaryOp):
+        operation = allowed_operators.get(type(node.op))
+
+        if operation is None:
+            raise ValueError("Unsupported unary operator.")
+
+        return operation(evaluate_expression(node.operand))
+
+    raise ValueError("Invalid mathematical expression.")
+
+
+@tool
+def math_tool(expression: str) -> str:
+    """
+    Calculate a basic arithmetic expression.
+
+    Args:
+        expression: A mathematical expression such as
+                    "(20 + 5) * 2" or "2 ** 8".
+
+    Returns:
+        The calculated result.
+    """
+
+    try:
+        parsed_expression = ast.parse(
+            expression,
+            mode="eval"
+        )
+
+        result = evaluate_expression(parsed_expression)
+
+        return str(result)
+
+    except ZeroDivisionError:
+        return "Error: Division by zero is not allowed."
+
+    except Exception as error:
+        return f"Math error: {error}"
+
+
+# =========================================================
+# WEB SEARCH TOOL
+# =========================================================
+
+@tool
+def search_tool(query: str) -> str:
+    """
+    Search the web for factual and current information.
+
+    Args:
+        query: A clear and concise web-search query.
+
+    Returns:
+        Titles, summaries and URLs from web-search results.
+    """
+
+    try:
+        with DDGS() as ddgs:
+            results = list(
+                ddgs.text(
+                    query,
+                    max_results=5
+                )
+            )
+
+        if not results:
+            return "No search results were found."
+
+        formatted_results = []
+
+        for index, result in enumerate(results, start=1):
+            title = result.get("title", "No title")
+            summary = result.get("body", "No summary")
+            url = result.get("href", "No URL")
+
+            formatted_results.append(
+                f"Result {index}\n"
+                f"Title: {title}\n"
+                f"Summary: {summary}\n"
+                f"URL: {url}"
+            )
+
+        return "\n\n".join(formatted_results)
+
+    except Exception as error:
+        return f"Web search failed: {error}"
+
+
+# =========================================================
+# CREATE AGENT
+# =========================================================
+
+tools = [
+    search_tool,
+    math_tool
+]
+
+
+agent = create_agent(
+    model=model,
+    tools=tools,
+    system_prompt="""
+You are a helpful AI assistant.
+
+You have access to two tools:
+
+1. search_tool
+   Use this for:
+   - people and biographies
+   - places
+   - companies
+   - sports
+   - events
+   - current information
+   - factual web questions
+
+2. math_tool
+   Use this for arithmetic calculations.
+
+Rules:
+
+- Use only the tools listed above.
+- Do not invent other tool names.
+- For greetings and casual conversation, answer directly.
+- Read the complete conversation before answering.
+- Resolve words such as he, she, it and they using conversation history.
+- For questions containing words such as current, latest,
+  today or this year, use search_tool.
+- After using a tool, provide a clear final answer.
+"""
+)
+
+
+# =========================================================
+# INITIALISE CHAT HISTORY
+# =========================================================
+
 if "messages" not in st.session_state:
-    st.session_state["messages"]=[
-        {"role":"assistant","content":"Hey i am a Chatbot who will help you with Math problems"}
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": (
+                "Hello! I can help you with mathematics, "
+                "web searches and general questions."
+            )
+        }
     ]
 
 
-for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
+# =========================================================
+# DISPLAY EXISTING CHAT MESSAGES
+# =========================================================
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
 
 
-user_input=st.text_area("Please provide the scenario")
+# =========================================================
+# RECEIVE USER INPUT
+# =========================================================
 
-button=st.button("Generate Answer")
+user_input = st.chat_input(
+    "Ask a question"
+)
 
 
-if button:
-    if user_input:
+# =========================================================
+# PROCESS USER INPUT
+# =========================================================
 
-            with st.spinner("Generate response.."):
-                st_cb = StreamlitCallbackHandler(
-                      st.container(),
-                      expand_new_thoughts=False)
-    
-                st.session_state.messages.append({"role": "user", "content":user_input})
-                st.chat_message("user").write(user_input)
-    
-                with st.chat_message("assistant"):
-                    response = agent.invoke(
-                        {
-                            "messages": [
-                                {
-                                    "messages":st.session_state.messages
-                                }
-                            ]
-                        },
-                        config={
-                            "callbacks": [st_cb]
-                        }
-                    )
-                answer = response["messages"][-1].content
-                st.session_state.messages.append({"role":"assistant","content":answer})
-            st.write("###response")
-            st.success(answer)
+if user_input:
 
-    else:
-      st.warning("kindly enter valid question")
+    # Save the user message in session memory
+    st.session_state.messages.append(
+        {
+            "role": "user",
+            "content": user_input
+        }
+    )
 
+    # Display the current user message
+    with st.chat_message("user"):
+        st.write(user_input)
+
+    # Create and display assistant response
+    with st.chat_message("assistant"):
+
+        try:
+            callback_handler = StreamlitCallbackHandler(
+                st.container(),
+                expand_new_thoughts=False
+            )
+
+            response = agent.invoke(
+                {
+                    "messages": st.session_state.messages
+                },
+                config={
+                    "callbacks": [callback_handler]
+                }
+            )
+
+            answer = response["messages"][-1].content
+
+        except Exception as error:
+            answer = (
+                "The agent encountered an error while generating "
+                f"the response.\n\nTechnical details: {error}"
+            )
+
+        st.write(answer)
+
+    # Save the assistant response in session memory
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": answer
+        }
+    )
 
