@@ -1,203 +1,155 @@
-# =========================
-# ARXIV TOOL
-# =========================
-from langchain_classic.chains.question_answering.map_reduce_prompt import messages
-from langchain_community.utilities.arxiv import ArxivAPIWrapper
-from langchain_community.tools.arxiv import ArxivQueryRun
-from streamlit import session_state
-from langchain_community.callbacks import StreamlitCallbackHandler
-
-arxiv_wrapper = ArxivAPIWrapper(
-    top_k_results=1,
-    doc_content_chars_max=400
-)
-
-arxiv_tool = ArxivQueryRun(api_wrapper=arxiv_wrapper)
-
-# =========================
-# WIKIPEDIA TOOL
-# =========================
-
-import wikipedia
-
-wikipedia.set_lang("en")
-
-from langchain_community.tools import WikipediaQueryRun
+from langchain_groq import ChatGroq
 from langchain_community.utilities import WikipediaAPIWrapper
-
-
-wiki_wrapper = WikipediaAPIWrapper(
-    top_k_results=2,
-    doc_content_chars_max=400
-)
-
-wiki_tool = WikipediaQueryRun(
-    api_wrapper=wiki_wrapper
-)
-
-# =========================
-# DUCKDUCKGO SEARCH TOOL
-# =========================
-from langchain_community.tools import DuckDuckGoSearchRun
-
-search_tool = DuckDuckGoSearchRun(  name="web_search",
-    description="""
-    Search the internet for current information.
-    Use this tool for people, events, companies, news,
-    and general knowledge questions.
-    """,)
-
-# =========================
-# LOAD PDF
-# =========================
-from langchain_community.document_loaders import PyPDFLoader
-
-loader = PyPDFLoader("IF3KF6_2026_online.pdf")
-docs = loader.load()
-
-# =========================
-# SPLIT DOCUMENTS
-# =========================
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200
-)
-
-texts = text_splitter.split_documents(docs)
-
-# =========================
-# EMBEDDINGS
-# =========================
-from langchain_huggingface import HuggingFaceEmbeddings
-
-embedding = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
-
-# =========================
-# VECTOR STORE
-# =========================
-from langchain_chroma import Chroma
-
-vectorstore = Chroma.from_documents(
-    documents=texts,
-    embedding=embedding
-)
-
-retriever = vectorstore.as_retriever()
-
-# =========================
-# RETRIEVER TOOL
-# =========================
-from langchain_core.tools import create_retriever_tool
-
-retriever_tool = create_retriever_tool(
-    retriever,
-    "insurance_policy_search",
-    "Search information from the uploaded insurance policy PDF."
-)
-
-# =========================
-# LOAD ENV VARIABLES
-# =========================
+from langchain_classic.chains import LLMMathChain
+from langchain_classic.chains.llm import LLMChain
+from langchain_classic.prompts.prompt import PromptTemplate
+from langchain.agents import create_agent
+from langchain_community.tools import Tool
+import streamlit as st
+from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
+from langchain.tools import tool
 import os
 from dotenv import load_dotenv
-
 load_dotenv()
 
-groq_api_key = os.getenv("GROQ_API")
+#importing from env file
+
+api_key=os.getenv("GROQ_API")
+
+#creating the model
+
+model=ChatGroq(model="llama-3.1-8b-instant",api_key=api_key,temperature=0)
+
+#creating the tools
+
+@tool
+def Math_tool(expression: str) -> str:
+    """ Solves mathematical calculations. Input should be a valid Python mathematical expression. """
+    try:
+        result = eval(expression)
+        return str(result)
+    except Exception as e:
+        return f"Error: {e}"
+
+#creating the math tool
+import wikipediaapi
+from langchain_core.tools import tool
+from ddgs import DDGS
+
+@tool
+def search_tool(query:str) -> str:
+    """Please use this tool to search the person , place or the information in the web in detail like in 300 words"""
+    with DDGS() as ddgs:
+        results = list(ddgs.text(query, max_results=5))
+
+    if not results:
+        return "No search results found."
+
+    output = []
+
+    for result in results:
+        output.append(
+            f"Title: {result['title']}\n"
+            f"Body: {result['body']}\n"
+            f"URL: {result['href']}\n"
+        )
+
+    return "\n\n".join(output)
+
+#creating the prompt and logic reasoning tool
+
+prompt="""
+You are the reasoning tool
+"""
+
+prompt_template=PromptTemplate(input_variables=["text"],template=prompt)
+
+chain=LLMChain(llm=model,prompt=prompt_template)
+
+@tool
+def logic_reasoning(query:str) -> str:
+    """You are the reasoning tool"""
+    return chain.run(query)
+
+# logic_reasoning=Tool(
+#     name="Logic_reasoning_tool",
+#     func=chain.run,
+#     description="You are the reasoning tool"
+# )
+
+tools=[search_tool,Math_tool,logic_reasoning]
+
+#create the agent
+agent=create_agent(model=model,tools=tools,system_prompt="""
+You are a helpful assistant.
+
+You have access ONLY to these tools:
+- search_tool
+- math_tool
+- logic_reasoning
+
+Never call brave_search, web_search, google_search, browser_search, or any tool not listed above.
+
+For factual biography questions, use wikipedia_tool.
+For calculations, use math_tool.
+For reasoning, use logic_reasoning.
+""")
+
+#streamlit
+
+st.set_page_config(page_title="MATH PROBLEM SOLVER",page_icon="👻")
+st.title("Ayy lowde")
 
 
+groq_api_key=st.sidebar.text_input(label="Groq API key",type="password")
 
-#strealit and adding the memory
-
-from langchain_core.prompts import ChatPromptTemplate
-
-import streamlit as st
-
-st.sidebar.title("Settings")
+if not groq_api_key:
+    st.info("Please providet the GROQ API key")
+    st.stop()
 
 if "messages" not in st.session_state:
-    st.session_state["messages"]=[{
-        "role":"assistant",
-        "content":"i am chatbot am there to assist you"
-    }]
+    st.session_state["messages"]=[
+        {"role":"assistant","content":"Hey i am a Chatbot who will help you with Math problems"}
+    ]
+
+
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-if prompt := st.chat_input(placeholder="what is machine learning"):
-    st.session_state.messages.append({"role":"user","content":prompt})
-    st.chat_message("user").write(prompt)
 
-    # =========================
-    # GROQ MODEL
-    # =========================
-    from langchain_groq import ChatGroq
+user_input=st.text_area("Please provide the scenario")
 
-    llm = ChatGroq(
-        model="llama-3.1-8b-instant",
-        api_key=groq_api_key,
-        temperature=0
-    )
+button=st.button("Generate Answer")
 
-    # =========================
-    # TOOLS
-    # =========================
-    tools = [
-        search_tool,
-        arxiv_tool,
-        retriever_tool
-    ]
 
-    # =========================
-    # AGENT
-    # =========================
-    from langchain.agents import create_agent
+if button:
+    if user_input:
 
-    agent = create_agent(
-        model=llm,
-        tools=tools, system_prompt="""
-    You are a helpful AI assistant.
+        with st.spinner("Generate response.."):
 
-    Rules:
+            st.session_state.messages.append({"role": "user", "content":user_input})
+            st.chat_message("user").write(user_input)
 
-    - For general knowledge questions use web_search.
-    - For research questions use arxiv_tool.
-    - For insurance PDF questions use insurance_policy_search.
 
-    Always provide a final answer using the tool results.
-    Do not say the tool failed unless it actually failed.
-    """
-    )
+            response = agent.invoke(
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": user_input
+                        }
+                    ]
+                },
+                config={
+                    "callbacks": [st_cb]
+                }
+            )
+            answer = response["messages"][-1].content
+            st.session_state.messages.append({"role":"assistant","content":answer})
+            st.write("###response")
+            st.success(answer)
 
-    with st.chat_message("assistant"):
-        st_cb = StreamlitCallbackHandler(
-            st.container(),
-            expand_new_thoughts=False
-        )
+    else:
+      st.warning("kindly enter valid question")
 
-        response = agent.invoke(
-            {
-                "messages": [
-                    (msg["role"],msg["content"])
-                    for msg in st.session_state.messages
-                ]
-            },
-            config={
-                "callbacks": [st_cb]
-            }
-        )
-
-        answer = response["messages"][-1].content
-
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": answer
-            }
-        )
-
-        st.write(answer)
 
