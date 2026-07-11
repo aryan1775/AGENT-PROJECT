@@ -126,6 +126,9 @@ if button:
     if user_input:
 
         with st.spinner("Generate response.."):
+               st_cb = StreamlitCallbackHandler(
+                  st.container(),
+                  expand_new_thoughts=False)
 
             st.session_state.messages.append({"role": "user", "content":user_input})
             st.chat_message("user").write(user_input)
