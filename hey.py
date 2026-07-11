@@ -18,7 +18,7 @@ api_key=st.secrets["GROQ_API"]
 
 #creating the model
 
-model=ChatGroq(model="llama-3.1-8b-instant",api_key=api_key,temperature=0)
+model=ChatGroq(model="llama-3.3-70b-versatile",api_key=api_key,temperature=0)
 
 #creating the tools
 
