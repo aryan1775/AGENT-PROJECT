@@ -42,9 +42,10 @@ except KeyError:
 # =========================================================
 
 model = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="qwen/qwen3-32b",
     api_key=api_key,
-    temperature=0
+    temperature=0,
+    max_retries=2
 )
 
 
